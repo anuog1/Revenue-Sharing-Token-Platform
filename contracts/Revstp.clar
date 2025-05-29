@@ -560,3 +560,39 @@
         (map-set revenue-reports
           { report-id: report-id }
 
+ (merge report { 
+            status: u4, ;; Rejected
+            distribution-completed: false
+          })
+        )
+        
+        ;; Refund the escrowed revenue to the project creator
+        (let (
+          (project-id (get project-id report))
+          (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
+          (amount (get amount report))
+          (revenue-share (/ (* amount (get revenue-percentage project)) u10000))
+        )
+          (as-contract (stx-transfer? revenue-share (as-contract tx-sender) (get creator project)))
+        )
+        
+        (ok { report-id: report-id, status: "rejected" })
+      )
+    )
+  )
+  )
+
+;; Helper to check if verification is an approval
+(define-private (is-approval 
+  (verification { verifier: principal, approved: bool, timestamp: uint, comments: (string-utf8 128) }))
+  
+  (get approved verification)
+)
+
+;; Distribute revenue to token holders
+(define-private (distribute-revenue (report-id uint))
+  (let (
+    (report (unwrap! (map-get? revenue-reports { report-id: report-id }) err-report-not-found))
+    (project-id (get project-id report))
+    (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
+    (amount (get amount report))
