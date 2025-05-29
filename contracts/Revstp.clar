@@ -126,5 +126,164 @@
     disputed-by: (optional principal)
   }
 )
+;; Project report indices
+(define-map project-reports
+  { project-id: uint }
+  { report-ids: (list 100 uint) }
+)
+
+;; Revenue distribution claims
+(define-map revenue-claims
+  { report-id: uint, token-holder: principal }
+  {
+    amount: uint,
+    claimed: bool,
+    claim-block: (optional uint)
+  }
+)
+
+;; Secondary market orders
+(define-map market-orders
+  { order-id: uint }
+  {
+    project-id: uint,
+    seller: principal,
+    token-amount: uint,
+    price-per-token: uint,
+    total-price: uint,
+    creation-block: uint,
+    expiration-block: uint,
+    status: uint,
+    buyer: (optional principal),
+    execution-block: (optional uint),
+    platform-fee: uint,
+    creator-fee: uint
+  }
+)
+
+;; User orders index
+(define-map user-orders
+  { user: principal }
+  { order-ids: (list 100 uint) }
+)
+
+;; Project orders index
+(define-map project-orders
+  { project-id: uint }
+  { order-ids: (list 200 uint) }
+)
+
+;; Audit records
+(define-map audits
+  { audit-id: uint }
+  {
+    project-id: uint,
+    auditor: principal,
+    audit-type: (string-ascii 20), ;; "financial", "technical", "compliance"
+    start-block: uint,
+    completion-block: (optional uint),
+    status: uint,
+    findings: (list 10 {
+      category: (string-ascii 20),
+      severity: uint, ;; 1-5 scale
+      description: (string-utf8 256),
+      recommendation: (string-utf8 256)
+    }),
+    report-url: (optional (string-utf8 256)),
+    summary: (string-utf8 256)
+  }
+)
+
+  
+
+;; Project audits index
+(define-map project-audits
+  { project-id: uint }
+  { audit-ids: (list 50 uint) }
+)
+
+;; Authorized verifiers
+(define-map authorized-verifiers
+  { verifier: principal }
+  {
+    authorized: bool,
+    verification-count: uint,
+    staked-amount: uint,
+    accuracy-score: uint, ;; 0-100
+    specialties: (list 5 (string-ascii 32)),
+    last-active: uint
+  }
+)
+
+;; Initialize platform
+(define-public (initialize (treasury principal))
+  (begin
+    (if (not (is-eq tx-sender contract-owner))
+        err-owner-only
+        (if (is-none (as-contract (get-balance treasury)))
+            (err u126) ;; Invalid treasury address
+            (let (
+                (mint-result (ft-mint? platform-token (var-get platform-token-supply) treasury))
+            )
+              (if (is-ok mint-result)
+                  (begin
+                    (var-set treasury-address treasury)
+                    (var-set platform-fee-percentage u200) ;; 2%
+                    (var-set verification-period u72) ;; ~12 hours
+                    (var-set min-verification-threshold u3)
+                    (var-set emergency-halt false)
+                    (ok true)
+                  )
+                  (err u121) ;; fee payment failed
+              )
+            )
+        )
+    )
+  )
+)
+    ;; Parameter validation
+    (asserts! (> total-supply u0) err-invalid-parameters)
+    (asserts! (<= total-supply (var-get max-token-supply)) err-exceeds-platform-limit)
+    (asserts! (> token-price u0) err-invalid-parameters)
+    (asserts! (<= revenue-percentage u10000) err-invalid-parameters) ;; Max 100%
+    (asserts! (> revenue-period u0) err-invalid-parameters)
+    (asserts! (> duration revenue-period) err-invalid-parameters)
+    (asserts! (<= trading-fee u1000) err-invalid-parameters) ;; Max 10%
+    (asserts! (>= (len verifiers) (var-get min-verification-threshold)) err-invalid-parameters)
+    
+    ;; Verify all verifiers are authorized
+    (asserts! (all-verifiers-authorized verifiers) err-not-authorized)
+    
+    ;; Create the project
+    (map-set projects
+      { project-id: project-id }
+      {
+        name: name,
+        description: description,
+        creator: creator,
+        token-symbol: token-symbol,
+        total-supply: total-supply,
+        tokens-issued: u0,
+        revenue-percentage: revenue-percentage,
+        revenue-period: revenue-period,
+        duration: duration,
+        start-block: now,
+        end-block: (+ now duration),
+        status: u1, ;; Active
+        total-revenue-collected: u0,
+        total-revenue-distributed: u0,
+        last-report-block: now,
+        creation-block: now,
+        token-price: token-price,
+        min-investment: min-investment,
+   max-investment: max-investment,
+        trading-enabled: trading-enabled,
+        trading-start-block: (+ now trading-delay),
+        trading-fee: trading-fee,
+        metadata-url: metadata-url,
+        category: category,
+        verifiers: verifiers
+      }
+    )
 
 
