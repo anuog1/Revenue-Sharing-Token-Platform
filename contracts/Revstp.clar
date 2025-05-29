@@ -194,4 +194,52 @@
   }
 )
 
+  
+
+;; Project audits index
+(define-map project-audits
+  { project-id: uint }
+  { audit-ids: (list 50 uint) }
+)
+
+;; Authorized verifiers
+(define-map authorized-verifiers
+  { verifier: principal }
+  {
+    authorized: bool,
+    verification-count: uint,
+    staked-amount: uint,
+    accuracy-score: uint, ;; 0-100
+    specialties: (list 5 (string-ascii 32)),
+    last-active: uint
+  }
+)
+
+;; Initialize platform
+(define-public (initialize (treasury principal))
+  (begin
+    (if (not (is-eq tx-sender contract-owner))
+        err-owner-only
+        (if (is-none (as-contract (get-balance treasury)))
+            (err u126) ;; Invalid treasury address
+            (let (
+                (mint-result (ft-mint? platform-token (var-get platform-token-supply) treasury))
+            )
+              (if (is-ok mint-result)
+                  (begin
+                    (var-set treasury-address treasury)
+                    (var-set platform-fee-percentage u200) ;; 2%
+                    (var-set verification-period u72) ;; ~12 hours
+                    (var-set min-verification-threshold u3)
+                    (var-set emergency-halt false)
+                    (ok true)
+                  )
+                  (err u121) ;; fee payment failed
+              )
+            )
+        )
+    )
+  )
+)
+
 
