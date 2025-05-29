@@ -92,3 +92,39 @@
     verifiers: (list 10 principal)
   }
 )
+;; Map of project tokens
+(define-map project-tokens
+  { project-id: uint }
+  { token-id: uint }
+)
+
+;; Token balances for all projects
+(define-map token-balances
+  { project-id: uint, owner: principal }
+  { amount: uint }
+)
+;; Revenue reports
+(define-map revenue-reports
+  { report-id: uint }
+  {
+    project-id: uint,
+    amount: uint,
+    period-start: uint,
+    period-end: uint,
+    submission-block: uint,
+    status: uint,
+    verification-end-block: uint,
+    verifications: (list 10 {
+      verifier: principal,
+      approved: bool,
+      timestamp: uint,
+      comments: (string-utf8 128)
+    }),
+    distribution-completed: bool,
+    supporting-documents: (list 5 (string-utf8 256)),
+    distribution-block: (optional uint),
+    disputed-by: (optional principal)
+  }
+)
+
+
