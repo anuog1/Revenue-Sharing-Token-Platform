@@ -596,3 +596,35 @@
     (project-id (get project-id report))
     (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
     (amount (get amount report))
+   (revenue-share (/ (* amount (get revenue-percentage project)) u10000))
+    (total-supply (get total-supply project))
+  )
+    ;; Mark distribution as in progress
+    (map-set revenue-reports
+      { report-id: report-id }
+      (merge report { 
+        distribution-completed: true,
+        distribution-block: (some block-height)
+      })
+    )
+    
+    ;; Update project distributed amount
+    (map-set projects
+      { project-id: project-id }
+      (merge project {
+        total-revenue-distributed: (+ (get total-revenue-distributed project) revenue-share)
+      })
+    )
+    
+    (ok { report-id: report-id, status: "distributed", amount: revenue-share })
+  )
+)
+
+;; Claim revenue share as a token holder
+(define-public (claim-revenue (report-id uint))
+  (let (
+    (claimer tx-sender)
+    (report (unwrap! (map-get? revenue-reports { report-id: report-id }) err-report-not-found))
+    (project-id (get project-id report))
+    (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
+  )
