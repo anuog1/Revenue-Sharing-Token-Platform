@@ -490,3 +490,73 @@
       (verifier-record (unwrap! (map-get? authorized-verifiers { verifier: verifier }) err-not-authorized))
     )
 
+      ;; Update verifier stats
+      (map-set authorized-verifiers
+        { verifier: verifier }
+        (merge verifier-record {
+          verification-count: (+ (get verification-count verifier-record) u1),
+          last-active: block-height
+        })
+      )
+      
+      ;; Update report
+      (map-set revenue-reports
+        { report-id: report-id }
+        (merge report { verifications: updated-verifications })
+      )
+      
+      ;; Check if enough verifications to finalize
+      (if (>= (len updated-verifications) (var-get min-verification-threshold))
+        (finalize-report report-id)
+        (ok { report-id: report-id, status: "pending" })
+      )
+    )
+  )
+)
+
+;; Helper to find a verifier in the verification list
+(define-private (find-verifier 
+  (verifications (list 10 { verifier: principal, approved: bool, timestamp: uint, comments: (string-utf8 128) }))
+  (target-verifier principal))
+  
+  (filter is-target-verifier verifications)
+)
+;; Helper to check if verifier matches target
+(define-private (is-target-verifier 
+  (verification { verifier: principal, approved: bool, timestamp: uint, comments: (string-utf8 128) }))
+  
+  (is-eq (get verifier verification) target-verifier)
+)
+
+;; Finalize report after verification
+(define-private (finalize-report (report-id uint))
+  (let (
+    (report (unwrap! (map-get? revenue-reports { report-id: report-id }) err-report-not-found))
+    (verifications (get verifications report))
+    (approvals (filter is-approval verifications))
+    (approval-count (len approvals))
+    (verification-count (len verifications))
+    (approved (>= (* approval-count u100) (* verification-count u60))) ;; >60% approval rate
+  )
+    (if approved
+      (let (
+        (project-id (get project-id report))
+        (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
+      )
+        ;; Mark report as verified
+        (map-set revenue-reports
+          { report-id: report-id }
+          (merge report { 
+            status: u3, ;; Verified
+            distribution-completed: false
+          })
+        )
+        
+        ;; Calculate and distribute revenue shares
+        (distribute-revenue report-id)
+      )
+      ;; Mark report as rejected
+      (begin
+        (map-set revenue-reports
+          { report-id: report-id }
+
