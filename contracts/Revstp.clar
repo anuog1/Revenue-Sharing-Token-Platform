@@ -1053,3 +1053,76 @@
       (merge verifier-info {
         staked-amount: (+ (get staked-amount verifier-info) amount)
       })
+    )
+    
+    (ok { staked: amount })
+  )
+)
+
+;; Unstake tokens as a verifier
+(define-public (unstake-as-verifier (amount uint))
+  (let (
+    (verifier tx-sender)
+    (verifier-info (unwrap! (map-get? authorized-verifiers { verifier: verifier }) err-not-authorized))
+    (staked-amount (get staked-amount verifier-info))
+  )
+    ;; Validate verifier has enough staked
+    (asserts! (>= staked-amount amount) err-insufficient-funds)
+    
+    ;; Transfer tokens back to verifier
+    (as-contract (try! (ft-transfer? platform-token amount (as-contract tx-sender) verifier)))
+    
+    ;; Update verifier staked amount
+    (map-set authorized-verifiers
+      { verifier: verifier }
+      (merge verifier-info {
+        staked-amount: (- staked-amount amount)
+      })
+    )
+    
+    (ok { unstaked: amount })
+  )
+)
+
+;; Update project status
+(define-public (update-project-status (project-id uint) (new-status uint))
+  (let (
+    (admin tx-sender)
+    (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
+  )
+    ;; Validation
+    (asserts! (or (is-eq admin contract-owner) (is-eq admin (get creator project))) err-not-authorized)
+    (asserts! (< new-status u5) err-invalid-parameters) ;; Valid status
+    
+    ;; Update project
+    (map-set projects
+      { project-id: project-id }
+      (merge project { status: new-status })
+    )
+    
+    (ok { project-id: project-id, status: new-status })
+  )
+)
+
+;; Dispute a revenue report
+(define-public (dispute-report (report-id uint) (reason (string-utf8 128)))
+  (let (
+    (disputer tx-sender)
+    (report (unwrap! (map-get? revenue-reports { report-id: report-id }) err-report-not-found))
+    (project-id (get project-id report))
+    (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
+  )
+    ;; Validation
+    (asserts! (is-eq (get status report) u1) err-verification-failed) ;; Report must be in verification
+    (asserts! (< block-height (get verification-end-block report)) err-verification-period-ended)
+    
+    ;; Check if disputer holds tokens
+    (let (
+      (holder-balance (default-to { amount: u0 } (map-get? token-balances { project-id: project-id, owner: disputer })))
+      (token-amount (get amount holder-balance))
+    )
+      (asserts! (> token-amount u0) err-not-authorized) ;; Must hold tokens to dispute
+      
+      ;; Update report
+      (map-set revenue-reports
+        { report-id: report-id }
