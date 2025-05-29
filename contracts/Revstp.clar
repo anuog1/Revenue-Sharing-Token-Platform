@@ -41,3 +41,54 @@
 (define-data-var treasury-address principal contract-owner)
 (define-data-var emergency-halt bool false)
 (define-data-var platform-token-supply uint u1000000000) ;; 1 billion platform tokens
+
+;; Platform token for governance and staking
+(define-fungible-token platform-token)
+
+;; Project status enumeration
+;; 0 = Draft, 1 = Active, 2 = Paused, 3 = Closed, 4 = Default
+(define-data-var project-statuses (list 5 (string-ascii 10)) (list "Draft" "Active" "Paused" "Closed" "Default"))
+
+;; Revenue report status enumeration
+;; 0 = Submitted, 1 = Verification, 2 = Disputed, 3 = Verified, 4 = Rejected
+(define-data-var report-statuses (list 5 (string-ascii 12)) (list "Submitted" "Verification" "Disputed" "Verified" "Rejected"))
+
+;; Order status enumeration
+;; 0 = Open, 1 = Filled, 2 = Cancelled, 3 = Expired
+(define-data-var order-statuses (list 4 (string-ascii 10)) (list "Open" "Filled" "Cancelled" "Expired"))
+
+;; Audit status enumeration
+;; 0 = Pending, 1 = In Progress, 2 = Completed, 3 = Failed
+(define-data-var audit-statuses (list 4 (string-ascii 12)) (list "Pending" "InProgress" "Completed" "Failed"))
+
+;; Project structure
+(define-map projects
+  { project-id: uint }
+  {
+    name: (string-ascii 64),
+    description: (string-utf8 256),
+    creator: principal,
+    token-symbol: (string-ascii 10),
+    total-supply: uint,
+    tokens-issued: uint,
+    revenue-percentage: uint, ;; Percentage of revenue allocated to token holders (basis points)
+    revenue-period: uint, ;; In blocks (e.g., 8640 for monthly at 6 blocks/hour)
+    duration: uint, ;; Total duration in blocks
+    start-block: uint,
+ end-block: uint,
+    status: uint,
+    total-revenue-collected: uint,
+    total-revenue-distributed: uint,
+    last-report-block: uint,
+    creation-block: uint,
+    token-price: uint, ;; Initial token price in microstacks
+    min-investment: uint,
+    max-investment: uint,
+    trading-enabled: bool,
+    trading-start-block: uint,
+    trading-fee: uint, ;; In basis points
+    metadata-url: (string-utf8 256),
+    category: (string-ascii 32),
+    verifiers: (list 10 principal)
+  }
+)
