@@ -628,3 +628,43 @@
     (project-id (get project-id report))
     (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
   )
+     ;; Validation
+    (asserts! (is-eq (get status report) u3) err-verification-failed) ;; Report must be verified
+    (asserts! (get distribution-completed report) err-verification-in-progress) ;; Distribution must be completed
+    
+    ;; Check if already claimed
+    (let (
+      (claim (map-get? revenue-claims { report-id: report-id, token-holder: claimer }))
+    )
+      (asserts! (or (is-none claim) (not (get claimed (default-to { claimed: false } claim)))) err-already-claimed)
+      
+      ;; Calculate share based on token holdings
+      (let (
+        (holder-balance (default-to { amount: u0 } (map-get? token-balances { project-id: project-id, owner: claimer })))
+        (token-amount (get amount holder-balance))
+        (total-supply (get total-supply project))
+        (amount (get amount report))
+        (revenue-share (/ (* amount (get revenue-percentage project)) u10000))
+        (holder-share (/ (* revenue-share token-amount) total-supply))
+      )
+        ;; Ensure there's something to claim
+        (asserts! (> holder-share u0) err-nothing-to-claim)
+        
+        ;; Transfer the share to the claimer
+        (as-contract (try! (stx-transfer? holder-share (as-contract tx-sender) claimer)))
+        
+        ;; Record the claim
+        (map-set revenue-claims
+          { report-id: report-id, token-holder: claimer }
+          {
+            amount: holder-share,
+            claimed: true,
+            claim-block: (some block-height)
+          }
+  )
+        
+        (ok { amount: holder-share })
+      )
+    )
+  )
+)
