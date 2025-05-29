@@ -126,5 +126,72 @@
     disputed-by: (optional principal)
   }
 )
+;; Project report indices
+(define-map project-reports
+  { project-id: uint }
+  { report-ids: (list 100 uint) }
+)
+
+;; Revenue distribution claims
+(define-map revenue-claims
+  { report-id: uint, token-holder: principal }
+  {
+    amount: uint,
+    claimed: bool,
+    claim-block: (optional uint)
+  }
+)
+
+;; Secondary market orders
+(define-map market-orders
+  { order-id: uint }
+  {
+    project-id: uint,
+    seller: principal,
+    token-amount: uint,
+    price-per-token: uint,
+    total-price: uint,
+    creation-block: uint,
+    expiration-block: uint,
+    status: uint,
+    buyer: (optional principal),
+    execution-block: (optional uint),
+    platform-fee: uint,
+    creator-fee: uint
+  }
+)
+
+;; User orders index
+(define-map user-orders
+  { user: principal }
+  { order-ids: (list 100 uint) }
+)
+
+;; Project orders index
+(define-map project-orders
+  { project-id: uint }
+  { order-ids: (list 200 uint) }
+)
+
+;; Audit records
+(define-map audits
+  { audit-id: uint }
+  {
+    project-id: uint,
+    auditor: principal,
+    audit-type: (string-ascii 20), ;; "financial", "technical", "compliance"
+    start-block: uint,
+    completion-block: (optional uint),
+    status: uint,
+    findings: (list 10 {
+      category: (string-ascii 20),
+      severity: uint, ;; 1-5 scale
+      description: (string-utf8 256),
+      recommendation: (string-utf8 256)
+    }),
+    report-url: (optional (string-utf8 256)),
+    summary: (string-utf8 256)
+  }
+)
 
 
