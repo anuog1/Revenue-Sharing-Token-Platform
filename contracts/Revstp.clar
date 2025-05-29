@@ -859,3 +859,197 @@
   (let (
     (processor tx-sender)
     (order (unwrap! (map-get? market-orders { order-id: order-id }) err-order-not-found))
+ (project-id (get project-id order))
+    (seller (get seller order))
+  )
+    ;; Validation
+    (asserts! (is-eq (get status order) u0) err-invalid-order-state) ;; Order must be open
+    (asserts! (>= block-height (get expiration-block order)) err-invalid-order-state) ;; Order must be expired
+    
+    ;; Return tokens to seller
+    (let (
+      (token-amount (get token-amount order))
+      (seller-balance (default-to { amount: u0 } (map-get? token-balances { project-id: project-id, owner: seller })))
+      (new-balance (+ (get amount seller-balance) token-amount))
+    )
+      (map-set token-balances
+        { project-id: project-id, owner: seller }
+        { amount: new-balance }
+      )
+    )
+    
+    ;; Update order status
+    (map-set market-orders
+      { order-id: order-id }
+      (merge order {
+        status: u3 ;; Expired
+      })
+    )
+    
+    (ok { order-id: order-id })
+  )
+)
+
+;; Submit a project for audit
+(define-public (request-audit (project-id uint) (audit-type (string-ascii 20)))
+  (let (
+    (creator tx-sender)
+    (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
+    (audit-id (var-get next-audit-id))
+  )
+
+       ;; Validation
+    (asserts! (is-eq creator (get creator project)) err-not-authorized) ;; Only creator can request audit
+    (asserts! (or (is-eq audit-type "financial") 
+                (is-eq audit-type "technical") 
+                (is-eq audit-type "compliance")) 
+              err-invalid-parameters) ;; Valid audit type
+    
+    ;; Create audit record
+    (map-set audits
+      { audit-id: audit-id }
+      {
+        project-id: project-id,
+        auditor: contract-owner, ;; Initially assigned to contract owner, will be reassigned
+        audit-type: audit-type,
+        start-block: block-height,
+        completion-block: none,
+        status: u0, ;; Pending
+        findings: (list),
+        report-url: none,
+        summary: "Audit requested and pending assignment."
+      }
+    )
+    
+    ;; Add audit to project audits
+    (let (
+      (project-audit-list (get audit-ids (default-to { audit-ids: (list) } 
+                                         (map-get? project-audits { project-id: project-id }))))
+    )
+      (map-set project-audits
+        { project-id: project-id }
+        { audit-ids: (append project-audit-list audit-id) }
+      )
+    )
+    
+    ;; Increment audit ID
+    (var-set next-audit-id (+ audit-id u1))
+    
+    (ok { audit-id: audit-id })
+  )
+)
+
+;; Assign auditor to an audit
+(define-public (assign-auditor (audit-id uint) (auditor principal))
+  (let (
+    (admin tx-sender)
+    (audit (unwrap! (map-get? audits { audit-id: audit-id }) err-audit-not-found))
+  )
+    ;; Validation
+    (asserts! (is-eq admin contract-owner) err-not-authorized) ;; Only platform owner can assign
+    (asserts! (is-eq (get status audit) u0) err-audit-in-progress) ;; Audit must be pending
+    
+    ;; Update audit record
+    (map-set audits
+      { audit-id: audit-id }
+      (merge audit {
+        auditor: auditor,
+        status: u1, ;; In Progress
+        summary: "Audit assigned and in progress."
+      })
+    )
+    
+    (ok { audit-id: audit-id, auditor: auditor })
+  )
+)
+
+;; Submit audit findings
+(define-public (submit-audit-findings 
+  (audit-id uint) 
+  (findings (list 10 { category: (string-ascii 20), severity: uint, description: (string-utf8 256), recommendation: (string-utf8 256) }))
+  (report-url (string-utf8 256))
+  (summary (string-utf8 256)))
+  
+  (let (
+    (auditor tx-sender)
+    (audit (unwrap! (map-get? audits { audit-id: audit-id }) err-audit-not-found))
+  )
+    ;; Validation
+    (asserts! (is-eq auditor (get auditor audit)) err-not-authorized) ;; Only assigned auditor can submit
+    (asserts! (is-eq (get status audit) u1) err-invalid-audit-data) ;; Audit must be in progress
+    
+    ;; Update audit record
+    (map-set audits
+      { audit-id: audit-id }
+      (merge audit {
+        completion-block: (some block-height),
+        status: u2, ;; Completed
+        findings: findings,
+        report-url: (some report-url),
+        summary: summary
+      })
+    )
+    
+    (ok { audit-id: audit-id })
+  )
+)
+
+;; Authorize a verifier
+(define-public (authorize-verifier (verifier principal) (specialties (list 5 (string-ascii 32))))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    
+    (map-set authorized-verifiers
+      { verifier: verifier }
+      {
+        authorized: true,
+        verification-count: u0,
+        staked-amount: u0,
+        accuracy-score: u70, ;; Start with a neutral score
+        specialties: specialties,
+        last-active: block-height
+      }
+    )
+    
+    (ok true)
+  )
+)
+;; Deauthorize a verifier
+(define-public (deauthorize-verifier (verifier principal))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    
+    (let (
+      (verifier-info (unwrap! (map-get? authorized-verifiers { verifier: verifier }) err-not-authorized))
+    )
+      (map-set authorized-verifiers
+        { verifier: verifier }
+        (merge verifier-info { authorized: false })
+      )
+      
+      (ok true)
+    )
+  )
+)
+
+;; Stake tokens as a verifier
+(define-public (stake-as-verifier (amount uint))
+  (let (
+    (verifier tx-sender)
+    (verifier-info (unwrap! (map-get? authorized-verifiers { verifier: verifier }) err-not-authorized))
+  )
+    ;; Validate verifier is authorized
+    (asserts! (get authorized verifier-info) err-not-authorized)
+    
+    ;; Check verifier has enough platform tokens
+    (asserts! (>= (ft-get-balance platform-token verifier) amount) err-insufficient-funds)
+    
+    ;; Transfer tokens to contract
+    (try! (ft-transfer? platform-token amount verifier (as-contract tx-sender)))
+    
+    ;; Update verifier staked amount
+    (map-set authorized-verifiers
+      { verifier: verifier }
+      (merge verifier-info {
+        staked-amount: (+ (get staked-amount verifier-info) amount)
+      })
