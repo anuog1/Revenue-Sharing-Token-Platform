@@ -668,3 +668,33 @@
     )
   )
 )
+;; Create a sell order for tokens on the secondary market
+(define-public (create-sell-order
+  (project-id uint)
+  (token-amount uint)
+  (price-per-token uint)
+  (expiration-blocks uint))
+  
+  (let (
+    (seller tx-sender)
+    (order-id (var-get next-order-id))
+    (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
+    (total-price (* token-amount price-per-token))
+    (now block-height)
+    (expiration (+ now expiration-blocks))
+  )
+    ;; Validation
+    (asserts! (get trading-enabled project) err-not-within-trading-window) ;; Trading must be enabled
+    (asserts! (>= now (get trading-start-block project)) err-not-within-trading-window) ;; Trading must have started
+    (asserts! (> token-amount u0) err-invalid-parameters) ;; Amount must be positive
+    (asserts! (> price-per-token u0) err-invalid-parameters) ;; Price must be positive
+    
+    ;; Check seller has enough tokens
+    (let (
+      (holder-balance (default-to { amount: u0 } (map-get? token-balances { project-id: project-id, owner: seller })))
+      (token-amount-owned (get amount holder-balance))
+    )
+      (asserts! (>= token-amount-owned token-amount) err-insufficient-funds)
+      
+      ;; Calculate fees
+      (let (
