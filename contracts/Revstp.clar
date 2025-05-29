@@ -286,4 +286,207 @@
       }
     )
 
+        
+    ;; Initialize project reports list
+    (map-set project-reports
+      { project-id: project-id }
+      { report-ids: (list) }
+    )
+    
+    ;; Initialize project audit list
+    (map-set project-audits
+      { project-id: project-id }
+      { audit-ids: (list) }
+    )
+    
+    ;; Initialize creator token balance
+    (map-set token-balances
+      { project-id: project-id, owner: creator }
+      { amount: u0 }
+    )
+    
+    ;; Increment project ID counter
+    (var-set next-project-id (+ project-id u1))
+    
+    (ok project-id)
+  )
+)
+
+;; Helper to check if all verifiers are authorized
+(define-private (all-verifiers-authorized (verifiers (list 10 principal)))
+  (fold check-verifier-authorized true verifiers)
+)
+
+
+ 
+;; Helper to check a single verifier's authorization
+(define-private (check-verifier-authorized (result bool) (verifier principal))
+  (and result (default-to false (get authorized (map-get? authorized-verifiers { verifier: verifier }))))
+)
+
+;; Buy tokens for a project
+(define-public (buy-tokens (project-id uint) (token-amount uint))
+  (let (
+    (buyer tx-sender)
+    (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
+    (total-supply (get total-supply project))
+    (tokens-issued (get tokens-issued project))
+    (remaining-tokens (- total-supply tokens-issued))
+    (token-price (get token-price project))
+    (total-cost (* token-amount token-price))
+    (min-investment (get min-investment project))
+    (max-investment (get max-investment project))
+  )
+    ;; Validation
+    (asserts! (is-eq (get status project) u1) err-project-not-active) ;; Project must be active
+    (asserts! (<= token-amount remaining-tokens) err-exceeds-allocation) ;; Can't exceed remaining tokens
+    (asserts! (>= total-cost min-investment) err-invalid-parameters) ;; Must meet minimum investment
+    (asserts! (<= total-cost max-investment) err-invalid-parameters) ;; Can't exceed maximum investment
+    
+    ;; Check buyer has enough funds
+    (asserts! (>= (stx-get-balance buyer) total-cost) err-insufficient-funds)
+    
+    ;; Transfer payment to project creator with platform fee
+    (let (
+      (platform-fee (/ (* total-cost (var-get platform-fee-percentage)) u10000))
+      (creator-amount (- total-cost platform-fee))
+  )
+      ;; Transfer fees
+      (try! (stx-transfer? platform-fee buyer (var-get treasury-address)))
+      (try! (stx-transfer? creator-amount buyer (get creator project)))
+      
+      ;; Update token balance
+      (let (
+        (current-balance (default-to { amount: u0 } (map-get? token-balances { project-id: project-id, owner: buyer })))
+        (new-balance (+ (get amount current-balance) token-amount))
+      )
+        (map-set token-balances
+          { project-id: project-id, owner: buyer }
+          { amount: new-balance }
+        )
+      )
+      
+       ;; Update project tokens issued
+      (map-set projects
+        { project-id: project-id }
+        (merge project { tokens-issued: (+ tokens-issued token-amount) })
+      )
+      
+      (ok { tokens: token-amount, cost: total-cost, fee: platform-fee })
+    )
+  )
+)
+;; Report revenue for a project
+(define-public (report-revenue 
+  (project-id uint) 
+  (amount uint) 
+  (period-start uint) 
+  (period-end uint)
+  (supporting-docs (list 5 (string-utf8 256))))
+  
+  (let (
+    (reporter tx-sender)
+    (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
+    (creator (get creator project))
+    (report-id (var-get next-report-id))
+    (verification-end (+ block-height (var-get verification-period)))
+  )
+    ;; Validation
+    (asserts! (is-eq reporter creator) err-not-authorized) ;; Only creator can report
+    (asserts! (is-eq (get status project) u1) err-project-not-active) ;; Project must be active
+    (asserts! (< block-height (get end-block project)) err-project-not-active) ;; Project must not have ended
+    (asserts! (> period-end period-start) err-invalid-parameters) ;; Valid period
+    (asserts! (<= period-end block-height) err-invalid-report-period) ;; Can't report future revenue
+    (asserts! (> amount u0) err-invalid-parameters) ;; Amount must be positive
+    
+    ;; Ensure period doesn't overlap with previous reports
+    (asserts! (>= period-start (get last-report-block project)) err-invalid-report-period)
+   
+    ;; Transfer the revenue share to the contract
+    (let (
+      (revenue-share (/ (* amount (get revenue-percentage project)) u10000))
+    )
+      ;; Transfer revenue share to contract
+      (try! (stx-transfer? revenue-share reporter (as-contract tx-sender)))
+      
+      ;; Create the revenue report
+      (map-set revenue-reports
+        { report-id: report-id }
+        {
+          project-id: project-id,
+          amount: amount,
+          period-start: period-start,
+          period-end: period-end,
+          submission-block: block-height,
+          status: u1, ;; Verification
+          verification-end-block: verification-end,
+          verifications: (list),
+          distribution-completed: false,
+          supporting-documents: supporting-docs,
+          distribution-block: none,
+          disputed-by: none
+        }
+      )
+      
+      ;; Add report to project reports
+      (let (
+        (project-report-list (get report-ids (default-to { report-ids: (list) } 
+                                              (map-get? project-reports { project-id: project-id }))))
+      )
+        (map-set project-reports
+          { project-id: project-id }
+          { report-ids: (append project-report-list report-id) }
+        )
+      )
+      
+      ;; Update project
+      (map-set projects
+        { project-id: project-id }
+        (merge project {
+          total-revenue-collected: (+ (get total-revenue-collected project) amount),
+          last-report-block: period-en  d
+        })
+      )
+      
+      ;; Increment report ID
+      (var-set next-report-id (+ report-id u1))
+      
+      (ok { 
+        report-id: report-id, 
+        revenue-share: revenue-share, 
+        verification-end: verification-end 
+      })
+    )
+  )
+)
+;; Verify a revenue report
+(define-public (verify-report (report-id uint) (approved bool) (comments (string-utf8 128)))
+  (let (
+    (verifier tx-sender)
+    (report (unwrap! (map-get? revenue-reports { report-id: report-id }) err-report-not-found))
+    (project-id (get project-id report))
+    (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
+    (verifiers (get verifiers project))
+    (verification-end (get verification-end-block report))
+  )
+    ;; Validation
+    (asserts! (is-some (index-of verifiers verifier)) err-not-authorized) ;; Must be an authorized verifier
+    (asserts! (is-eq (get status report) u1) err-verification-failed) ;; Report must be in verification state
+    (asserts! (< block-height verification-end) err-verification-period-ended) ;; Verification period must be active
+    
+    ;; Check if verifier has already verified
+    (asserts! (is-none (find-verifier (get verifications report) verifier)) err-already-claimed)
+    
+    ;; Add verification
+    (let (
+      (current-verifications (get verifications report))
+      (new-verification {
+        verifier: verifier,
+        approved: approved,
+        timestamp: block-height,
+        comments: comments
+      })
+      (updated-verifications (append current-verifications new-verification))
+      (verifier-record (unwrap! (map-get? authorized-verifiers { verifier: verifier }) err-not-authorized))
+    )
 
