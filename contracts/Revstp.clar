@@ -276,5 +276,14 @@
         creation-block: now,
         token-price: token-price,
         min-investment: min-investment,
+   max-investment: max-investment,
+        trading-enabled: trading-enabled,
+        trading-start-block: (+ now trading-delay),
+        trading-fee: trading-fee,
+        metadata-url: metadata-url,
+        category: category,
+        verifiers: verifiers
+      }
+    )
 
 
