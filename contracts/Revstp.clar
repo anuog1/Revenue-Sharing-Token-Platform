@@ -366,3 +366,97 @@
         )
       )
       
+       ;; Update project tokens issued
+      (map-set projects
+        { project-id: project-id }
+        (merge project { tokens-issued: (+ tokens-issued token-amount) })
+      )
+      
+      (ok { tokens: token-amount, cost: total-cost, fee: platform-fee })
+    )
+  )
+)
+;; Report revenue for a project
+(define-public (report-revenue 
+  (project-id uint) 
+  (amount uint) 
+  (period-start uint) 
+  (period-end uint)
+  (supporting-docs (list 5 (string-utf8 256))))
+  
+  (let (
+    (reporter tx-sender)
+    (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
+    (creator (get creator project))
+    (report-id (var-get next-report-id))
+    (verification-end (+ block-height (var-get verification-period)))
+  )
+    ;; Validation
+    (asserts! (is-eq reporter creator) err-not-authorized) ;; Only creator can report
+    (asserts! (is-eq (get status project) u1) err-project-not-active) ;; Project must be active
+    (asserts! (< block-height (get end-block project)) err-project-not-active) ;; Project must not have ended
+    (asserts! (> period-end period-start) err-invalid-parameters) ;; Valid period
+    (asserts! (<= period-end block-height) err-invalid-report-period) ;; Can't report future revenue
+    (asserts! (> amount u0) err-invalid-parameters) ;; Amount must be positive
+    
+    ;; Ensure period doesn't overlap with previous reports
+    (asserts! (>= period-start (get last-report-block project)) err-invalid-report-period)
+   
+    ;; Transfer the revenue share to the contract
+    (let (
+      (revenue-share (/ (* amount (get revenue-percentage project)) u10000))
+    )
+      ;; Transfer revenue share to contract
+      (try! (stx-transfer? revenue-share reporter (as-contract tx-sender)))
+      
+      ;; Create the revenue report
+      (map-set revenue-reports
+        { report-id: report-id }
+        {
+          project-id: project-id,
+          amount: amount,
+          period-start: period-start,
+          period-end: period-end,
+          submission-block: block-height,
+          status: u1, ;; Verification
+          verification-end-block: verification-end,
+          verifications: (list),
+          distribution-completed: false,
+          supporting-documents: supporting-docs,
+          distribution-block: none,
+          disputed-by: none
+        }
+      )
+      
+      ;; Add report to project reports
+      (let (
+        (project-report-list (get report-ids (default-to { report-ids: (list) } 
+                                              (map-get? project-reports { project-id: project-id }))))
+      )
+        (map-set project-reports
+          { project-id: project-id }
+          { report-ids: (append project-report-list report-id) }
+        )
+      )
+      
+      ;; Update project
+      (map-set projects
+        { project-id: project-id }
+        (merge project {
+          total-revenue-collected: (+ (get total-revenue-collected project) amount),
+          last-report-block: period-en  d
+        })
+      )
+      
+      ;; Increment report ID
+      (var-set next-report-id (+ report-id u1))
+      
+      (ok { 
+        report-id: report-id, 
+        revenue-share: revenue-share, 
+        verification-end: verification-end 
+      })
+    )
+  )
+)
+
