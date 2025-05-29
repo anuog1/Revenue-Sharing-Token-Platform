@@ -1126,3 +1126,189 @@
       ;; Update report
       (map-set revenue-reports
         { report-id: report-id }
+
+
+        (merge report {
+          status: u2, ;; Disputed
+          disputed-by: (some disputer)
+        })
+      )
+      
+      (ok { report-id: report-id, status: "disputed" })
+    )
+  )
+)
+
+;; Emergency shutdown of the platform
+(define-public (emergency-shutdown (enable bool))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (var-set emergency-halt enable)
+    (ok enable)
+  )
+)
+
+;; Transfer tokens between users
+(define-public (transfer-tokens (project-id uint) (recipient principal) (amount uint))
+  (let (
+    (sender tx-sender)
+    (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
+    (sender-balance (default-to { amount: u0 } (map-get? token-balances { project-id: project-id, owner: sender })))
+    (recipient-balance (default-to { amount: u0 } (map-get? token-balances { project-id: project-id, owner: recipient })))
+  )
+    ;; Validation
+    (asserts! (get trading-enabled project) err-not-within-trading-window) ;; Trading must be enabled
+    (asserts! (>= block-height (get trading-start-block project)) err-not-within-trading-window)
+    (asserts! (>= (get amount sender-balance) amount) err-insufficient-funds)
+    
+   ;; Update balances
+    (map-set token-balances
+      { project-id: project-id, owner: sender }
+      { amount: (- (get amount sender-balance) amount) }
+    )
+    
+    (map-set token-balances
+      { project-id: project-id, owner: recipient }
+      { amount: (+ (get amount recipient-balance) amount) }
+    )
+    
+    (ok { amount: amount })
+  )
+)
+
+;; Read-only functions
+
+;; Get project details
+(define-read-only (get-project (project-id uint))
+  (map-get? projects { project-id: project-id })
+)
+
+;; Get user token balance
+(define-read-only (get-token-balance (project-id uint) (owner principal))
+  (default-to { amount: u0 } (map-get? token-balances { project-id: project-id, owner: owner }))
+)
+
+;; Get revenue report details
+(define-read-only (get-revenue-report (report-id uint))
+  (map-get? revenue-reports { report-id: report-id })
+)
+
+;; Get project reports
+(define-read-only (get-project-report-ids (project-id uint))
+  (get report-ids (default-to { report-ids: (list) } (map-get? project-reports { project-id: project-id })))
+)
+;; Get claim status
+(define-read-only (get-claim-status (report-id uint) (token-holder principal))
+  (map-get? revenue-claims { report-id: report-id, token-holder: token-holder })
+)
+
+;; Get market order details
+(define-read-only (get-market-order (order-id uint))
+  (map-get? market-orders { order-id: order-id })
+)
+
+;; Get user orders
+(define-read-only (get-user-order-ids (user principal))
+  (get order-ids (default-to { order-ids: (list) } (map-get? user-orders { user: user })))
+)
+
+;; Get project orders
+(define-read-only (get-project-order-ids (project-id uint))
+  (get order-ids (default-to { order-ids: (list) } (map-get? project-orders { project-id: project-id })))
+)
+
+;; Get audit details
+(define-read-only (get-audit (audit-id uint))
+  (map-get? audits { audit-id: audit-id })
+)
+
+;; Get project audit IDs
+(define-read-only (get-project-audit-ids (project-id uint))
+  (get audit-ids (default-to { audit-ids: (list) } (map-get? project-audits { project-id: project-id })))
+)
+
+;; Get verifier info
+(define-read-only (get-verifier-info (verifier principal))
+  (map-get? authorized-verifiers { verifier: verifier })
+)
+
+;; Get platform parameters
+(define-read-only (get-platform-parameters)
+  {
+    platform-fee-percentage: (var-get platform-fee-percentage),
+    verification-period: (var-get verification-period),
+    min-verification-threshold: (var-get min-verification-threshold),
+    max-token-supply: (var-get max-token-supply),
+    emergency-halt: (var-get emergency-halt)
+  }
+)
+
+;; Get project status as string
+(define-read-only (get-project-status-string (project-id uint))
+  (let (
+    (project (map-get? projects { project-id: project-id }))
+  )
+    (if (is-some project)
+      (let (
+        (status (get status (unwrap-panic project)))
+        (status-list (var-get project-statuses))
+      )
+        (default-to "Unknown" (element-at status-list status))
+      )
+      "Not Found"
+    )
+  )
+)
+
+;; Get report status as string
+(define-read-only (get-report-status-string (report-id uint))
+  (let (
+    (report (map-get? revenue-reports { report-id: report-id }))
+  )
+    (if (is-some report)
+      (let (
+        (status (get status (unwrap-panic report)))
+        (status-list (var-get report-statuses))
+      )
+        (default-to "Unknown" (element-at status-list status))
+      )
+      "Not Found"
+    )
+  )
+)
+
+;; Get order status as string
+(define-read-only (get-order-status-string (order-id uint))
+  (let (
+    (order (map-get? market-orders { order-id: order-id }))
+  )
+    (if (is-some order)
+      (let (
+        (status (get status (unwrap-panic order)))
+        (status-list (var-get order-statuses))
+      )
+        (default-to "Unknown" (element-at status-list status))
+      )
+      "Not Found"
+    )
+  )
+)
+
+;; Get audit status as string
+(define-read-only (get-audit-status-string (audit-id uint))
+  (let (
+    (audit (map-get? audits { audit-id: audit-id }))
+  )
+    (if (is-some audit)
+      (let (
+        (status (get status (unwrap-panic audit)))
+        (status-list (var-get audit-statuses))
+      )
+
+
+        (default-to "Unknown" (element-at status-list status))
+      )
+      "Not Found"
+    )
+  )
+)
