@@ -779,3 +779,83 @@
     ;; Validation
     (asserts! (not (is-eq buyer seller)) err-self-trade) ;; Can't buy from self
     (asserts! (is-eq (get status order) u0) err-invalid-order-state) ;; Order must be open
+    (asserts! (< block-height (get expiration-block order)) err-invalid-order-state) ;; Order must not be expired
+    
+    ;; Check buyer has enough funds
+    (asserts! (>= (stx-get-balance buyer) payment-amount) err-insufficient-funds)
+    
+    ;; Transfer funds
+    (try! (stx-transfer? total-price buyer seller)) ;; Pay seller
+    (try! (stx-transfer? platform-fee buyer (var-get treasury-address))) ;; Pay platform fee
+    (try! (stx-transfer? creator-fee buyer (get creator project))) ;; Pay creator fee
+    
+    ;; Update buyer's token balance
+    (let (
+      (buyer-balance (default-to { amount: u0 } (map-get? token-balances { project-id: project-id, owner: buyer })))
+      (new-balance (+ (get amount buyer-balance) token-amount))
+    )
+      (map-set token-balances
+        { project-id: project-id, owner: buyer }
+        { amount: new-balance }
+      )
+    )
+    
+    ;; Update order status
+    (map-set market-orders
+      { order-id: order-id }
+      (merge order {
+        status: u1, ;; Filled
+        buyer: (some buyer),
+        execution-block: (some block-height)
+      })
+    )
+    
+    (ok { 
+      order-id: order-id, 
+      token-amount: token-amount, 
+      total-price: total-price,
+      platform-fee: platform-fee,
+      creator-fee: creator-fee
+    })
+  )
+)
+;; Cancel a sell order
+(define-public (cancel-order (order-id uint))
+  (let (
+    (seller tx-sender)
+    (order (unwrap! (map-get? market-orders { order-id: order-id }) err-order-not-found))
+    (project-id (get project-id order))
+  )
+    ;; Validation
+    (asserts! (is-eq seller (get seller order)) err-not-authorized) ;; Only seller can cancel
+    (asserts! (is-eq (get status order) u0) err-invalid-order-state) ;; Order must be open
+    
+    ;; Return tokens to seller
+    (let (
+      (token-amount (get token-amount order))
+      (seller-balance (default-to { amount: u0 } (map-get? token-balances { project-id: project-id, owner: seller })))
+      (new-balance (+ (get amount seller-balance) token-amount))
+    )
+      (map-set token-balances
+        { project-id: project-id, owner: seller }
+        { amount: new-balance }
+      )
+    )
+    
+    ;; Update order status
+    (map-set market-orders
+      { order-id: order-id }
+      (merge order {
+        status: u2 ;; Cancelled
+      })
+    )
+    
+    (ok { order-id: order-id })
+  )
+)
+
+;; Process expired orders
+(define-public (process-expired-order (order-id uint))
+  (let (
+    (processor tx-sender)
+    (order (unwrap! (map-get? market-orders { order-id: order-id }) err-order-not-found))
