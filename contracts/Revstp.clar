@@ -286,4 +286,83 @@
       }
     )
 
+        
+    ;; Initialize project reports list
+    (map-set project-reports
+      { project-id: project-id }
+      { report-ids: (list) }
+    )
+    
+    ;; Initialize project audit list
+    (map-set project-audits
+      { project-id: project-id }
+      { audit-ids: (list) }
+    )
+    
+    ;; Initialize creator token balance
+    (map-set token-balances
+      { project-id: project-id, owner: creator }
+      { amount: u0 }
+    )
+    
+    ;; Increment project ID counter
+    (var-set next-project-id (+ project-id u1))
+    
+    (ok project-id)
+  )
+)
 
+;; Helper to check if all verifiers are authorized
+(define-private (all-verifiers-authorized (verifiers (list 10 principal)))
+  (fold check-verifier-authorized true verifiers)
+)
+
+
+ 
+;; Helper to check a single verifier's authorization
+(define-private (check-verifier-authorized (result bool) (verifier principal))
+  (and result (default-to false (get authorized (map-get? authorized-verifiers { verifier: verifier }))))
+)
+
+;; Buy tokens for a project
+(define-public (buy-tokens (project-id uint) (token-amount uint))
+  (let (
+    (buyer tx-sender)
+    (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
+    (total-supply (get total-supply project))
+    (tokens-issued (get tokens-issued project))
+    (remaining-tokens (- total-supply tokens-issued))
+    (token-price (get token-price project))
+    (total-cost (* token-amount token-price))
+    (min-investment (get min-investment project))
+    (max-investment (get max-investment project))
+  )
+    ;; Validation
+    (asserts! (is-eq (get status project) u1) err-project-not-active) ;; Project must be active
+    (asserts! (<= token-amount remaining-tokens) err-exceeds-allocation) ;; Can't exceed remaining tokens
+    (asserts! (>= total-cost min-investment) err-invalid-parameters) ;; Must meet minimum investment
+    (asserts! (<= total-cost max-investment) err-invalid-parameters) ;; Can't exceed maximum investment
+    
+    ;; Check buyer has enough funds
+    (asserts! (>= (stx-get-balance buyer) total-cost) err-insufficient-funds)
+    
+    ;; Transfer payment to project creator with platform fee
+    (let (
+      (platform-fee (/ (* total-cost (var-get platform-fee-percentage)) u10000))
+      (creator-amount (- total-cost platform-fee))
+  )
+      ;; Transfer fees
+      (try! (stx-transfer? platform-fee buyer (var-get treasury-address)))
+      (try! (stx-transfer? creator-amount buyer (get creator project)))
+      
+      ;; Update token balance
+      (let (
+        (current-balance (default-to { amount: u0 } (map-get? token-balances { project-id: project-id, owner: buyer })))
+        (new-balance (+ (get amount current-balance) token-amount))
+      )
+        (map-set token-balances
+          { project-id: project-id, owner: buyer }
+          { amount: new-balance }
+        )
+      )
+      
