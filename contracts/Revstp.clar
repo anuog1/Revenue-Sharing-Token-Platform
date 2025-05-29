@@ -241,5 +241,40 @@
     )
   )
 )
+    ;; Parameter validation
+    (asserts! (> total-supply u0) err-invalid-parameters)
+    (asserts! (<= total-supply (var-get max-token-supply)) err-exceeds-platform-limit)
+    (asserts! (> token-price u0) err-invalid-parameters)
+    (asserts! (<= revenue-percentage u10000) err-invalid-parameters) ;; Max 100%
+    (asserts! (> revenue-period u0) err-invalid-parameters)
+    (asserts! (> duration revenue-period) err-invalid-parameters)
+    (asserts! (<= trading-fee u1000) err-invalid-parameters) ;; Max 10%
+    (asserts! (>= (len verifiers) (var-get min-verification-threshold)) err-invalid-parameters)
+    
+    ;; Verify all verifiers are authorized
+    (asserts! (all-verifiers-authorized verifiers) err-not-authorized)
+    
+    ;; Create the project
+    (map-set projects
+      { project-id: project-id }
+      {
+        name: name,
+        description: description,
+        creator: creator,
+        token-symbol: token-symbol,
+        total-supply: total-supply,
+        tokens-issued: u0,
+        revenue-percentage: revenue-percentage,
+        revenue-period: revenue-period,
+        duration: duration,
+        start-block: now,
+        end-block: (+ now duration),
+        status: u1, ;; Active
+        total-revenue-collected: u0,
+        total-revenue-distributed: u0,
+        last-report-block: now,
+        creation-block: now,
+        token-price: token-price,
+        min-investment: min-investment,
 
 
