@@ -459,4 +459,34 @@
     )
   )
 )
+;; Verify a revenue report
+(define-public (verify-report (report-id uint) (approved bool) (comments (string-utf8 128)))
+  (let (
+    (verifier tx-sender)
+    (report (unwrap! (map-get? revenue-reports { report-id: report-id }) err-report-not-found))
+    (project-id (get project-id report))
+    (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
+    (verifiers (get verifiers project))
+    (verification-end (get verification-end-block report))
+  )
+    ;; Validation
+    (asserts! (is-some (index-of verifiers verifier)) err-not-authorized) ;; Must be an authorized verifier
+    (asserts! (is-eq (get status report) u1) err-verification-failed) ;; Report must be in verification state
+    (asserts! (< block-height verification-end) err-verification-period-ended) ;; Verification period must be active
+    
+    ;; Check if verifier has already verified
+    (asserts! (is-none (find-verifier (get verifications report) verifier)) err-already-claimed)
+    
+    ;; Add verification
+    (let (
+      (current-verifications (get verifications report))
+      (new-verification {
+        verifier: verifier,
+        approved: approved,
+        timestamp: block-height,
+        comments: comments
+      })
+      (updated-verifications (append current-verifications new-verification))
+      (verifier-record (unwrap! (map-get? authorized-verifiers { verifier: verifier }) err-not-authorized))
+    )
 
