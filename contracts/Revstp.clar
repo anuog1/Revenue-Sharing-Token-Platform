@@ -738,3 +738,44 @@
         
         ;; Add to project orders
         (let (
+
+          (project-order-list (default-to { order-ids: (list) } (map-get? project-orders { project-id: project-id })))
+          (updated-orders (append (get order-ids project-order-list) order-id))
+        )
+          (map-set project-orders
+            { project-id: project-id }
+            { order-ids: updated-orders }
+          )
+        )
+        
+        ;; Increment order ID
+        (var-set next-order-id (+ order-id u1))
+        
+        (ok { 
+          order-id: order-id, 
+          token-amount: token-amount, 
+          total-price: total-price,
+          platform-fee: platform-fee,
+          creator-fee: creator-fee
+        })
+      )
+    )
+  )
+)
+;; Fill a sell order (buy tokens)
+(define-public (fill-order (order-id uint))
+  (let (
+    (buyer tx-sender)
+    (order (unwrap! (map-get? market-orders { order-id: order-id }) err-order-not-found))
+    (project-id (get project-id order))
+    (project (unwrap! (map-get? projects { project-id: project-id }) err-project-not-found))
+    (seller (get seller order))
+    (token-amount (get token-amount order))
+    (total-price (get total-price order))
+    (platform-fee (get platform-fee order))
+    (creator-fee (get creator-fee order))
+    (payment-amount (+ total-price platform-fee creator-fee))
+  )
+    ;; Validation
+    (asserts! (not (is-eq buyer seller)) err-self-trade) ;; Can't buy from self
+    (asserts! (is-eq (get status order) u0) err-invalid-order-state) ;; Order must be open
